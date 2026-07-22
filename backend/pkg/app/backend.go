@@ -669,6 +669,20 @@ func (b *Backend) runBackendControllersUnderLeaderElection(ctx context.Context, 
 		backendInformers,
 		unionKubeApplierInformers,
 	)
+	azureNodePoolEphemeralOSDiskValidationController := validationcontrollers.NewNodePoolValidationController(
+		validations.NewAzureNodePoolEphemeralOSDiskValidation(b.options.FPAAzureCachedReaders.ResourceSKUsCachedReader),
+		activeOperationLister,
+		b.options.ResourcesDBClient,
+		backendInformers,
+		unionKubeApplierInformers,
+	)
+	azureNodePoolVMQuotaValidationController := validationcontrollers.NewNodePoolValidationController(
+		validations.NewAzureNodePoolVMQuotaValidation(b.options.FPAAzureCachedReaders.ResourceSKUsCachedReader, b.options.FPAClientBuilder),
+		activeOperationLister,
+		b.options.ResourcesDBClient,
+		backendInformers,
+		unionKubeApplierInformers,
+	)
 	nodePoolVersionController := upgradecontrollers.NewNodePoolVersionController(
 		b.options.ResourcesDBClient,
 		subscriptionLister,
@@ -870,6 +884,8 @@ func (b *Backend) runBackendControllersUnderLeaderElection(ctx context.Context, 
 				go azureRPRegistrationValidationController.Run(ctx, 20)
 				go azureClusterResourceGroupExistenceValidationController.Run(ctx, 20)
 				go azureClusterManagedIdentitiesExistenceValidationController.Run(ctx, 20)
+				go azureNodePoolEphemeralOSDiskValidationController.Run(ctx, 20)
+				go azureNodePoolVMQuotaValidationController.Run(ctx, 20)
 				go nodePoolVersionController.Run(ctx, 20)
 				go nodePoolActiveVersionController.Run(ctx, 20)
 				go createClusterScopedReadDesiresController.Run(ctx, 20)
