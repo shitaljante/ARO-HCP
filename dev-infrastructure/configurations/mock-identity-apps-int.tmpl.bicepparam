@@ -10,6 +10,10 @@ param identities = [
     certDns: '{{ .ci.int.mockIdentities.armHelper.certDns }}'
   }
   {
+    applicationName: '{{ .ci.int.mockIdentities.clustersServiceArmHelper.applicationName }}'
+    certDns: '{{ .ci.int.mockIdentities.clustersServiceArmHelper.certDns }}'
+  }
+  {
     applicationName: '{{ .ci.int.mockIdentities.msiMock.applicationName }}'
     certDns: '{{ .ci.int.mockIdentities.msiMock.certDns }}'
   }
@@ -17,4 +21,3 @@ param identities = [
 
 param poolSize = {{ .ci.int.mockIdentities.pool.size }}
 param poolAppBaseName = '{{ .ci.int.mockIdentities.pool.appBaseName }}'
-param poolCertBaseDns = '{{ .ci.int.mockIdentities.pool.certBaseDns }}'

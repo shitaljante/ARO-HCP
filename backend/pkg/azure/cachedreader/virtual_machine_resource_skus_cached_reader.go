@@ -14,6 +14,8 @@
 
 package cachedreader
 
+//go:generate $MOCKGEN -typed -source=virtual_machine_resource_skus_cached_reader.go -destination=mock_virtual_machine_resource_skus_cached_reader.go -package cachedreader VirtualMachineResourceSKUsCachedReader
+
 import (
 	"context"
 	"fmt"
@@ -30,7 +32,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v6"
 
 	azureclient "github.com/Azure/ARO-HCP/backend/pkg/azure/client"
-	"github.com/Azure/ARO-HCP/backend/pkg/controllers/controllerutils"
+	"github.com/Azure/ARO-HCP/backend/pkg/utils/controllerutils"
 	"github.com/Azure/ARO-HCP/internal/utils"
 )
 

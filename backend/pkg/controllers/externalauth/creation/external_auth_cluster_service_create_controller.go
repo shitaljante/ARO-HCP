@@ -25,12 +25,12 @@ import (
 	arohcpv1alpha1 "github.com/openshift-online/ocm-sdk-go/arohcp/v1alpha1"
 	ocmerrors "github.com/openshift-online/ocm-sdk-go/errors"
 
-	"github.com/Azure/ARO-HCP/backend/pkg/controllers/controllerutils"
-	"github.com/Azure/ARO-HCP/backend/pkg/informers"
-	"github.com/Azure/ARO-HCP/backend/pkg/listers"
+	"github.com/Azure/ARO-HCP/backend/pkg/utils/controllerutils"
 	"github.com/Azure/ARO-HCP/internal/api"
-	controllerutil "github.com/Azure/ARO-HCP/internal/controllerutils"
-	"github.com/Azure/ARO-HCP/internal/database"
+	"github.com/Azure/ARO-HCP/internal/database/cosmosstorage/corecosmosstorage"
+	"github.com/Azure/ARO-HCP/internal/database/cosmosstorage/cosmosstorageutils"
+	"github.com/Azure/ARO-HCP/internal/database/informers/coreinformers"
+	"github.com/Azure/ARO-HCP/internal/database/listers/corelisters"
 	"github.com/Azure/ARO-HCP/internal/ocm"
 	"github.com/Azure/ARO-HCP/internal/utils"
 )
@@ -38,23 +38,20 @@ import (
 const ExternalAuthClusterServiceCreateControllerName = "ExternalAuthClusterServiceCreate"
 
 type externalAuthClusterServiceCreateSyncer struct {
-	cooldownChecker       controllerutil.CooldownChecker
-	resourcesDBClient     database.ResourcesDBClient
-	externalAuthLister    listers.ExternalAuthLister
-	clusterLister         listers.ClusterLister
+	resourcesDBClient     corecosmosstorage.ResourcesDBClient
+	externalAuthLister    corelisters.ExternalAuthLister
+	clusterLister         corelisters.ClusterLister
 	clustersServiceClient ocm.ClusterServiceClientSpec
 }
 
 func NewExternalAuthClusterServiceCreateController(
-	resourcesDBClient database.ResourcesDBClient,
+	resourcesDBClient corecosmosstorage.ResourcesDBClient,
 	clustersServiceClient ocm.ClusterServiceClientSpec,
-	activeOperationLister listers.ActiveOperationLister,
-	informers informers.BackendInformers,
+	informers coreinformers.BackendInformers,
 ) controllerutils.Controller {
 	_, externalAuthLister := informers.ExternalAuths()
 	_, clusterLister := informers.Clusters()
 	syncer := &externalAuthClusterServiceCreateSyncer{
-		cooldownChecker:       controllerutils.DefaultActiveOperationPrioritizingCooldown(activeOperationLister),
 		resourcesDBClient:     resourcesDBClient,
 		externalAuthLister:    externalAuthLister,
 		clusterLister:         clusterLister,
@@ -79,7 +76,7 @@ func (c *externalAuthClusterServiceCreateSyncer) SyncOnce(ctx context.Context, k
 	logger := utils.LoggerFromContext(ctx)
 
 	externalAuth, err := c.externalAuthLister.Get(ctx, key.SubscriptionID, key.ResourceGroupName, key.HCPClusterName, key.HCPExternalAuthName)
-	if database.IsNotFoundError(err) {
+	if cosmosstorageutils.IsNotFoundError(err) {
 		return nil
 	}
 	if err != nil {
@@ -92,7 +89,7 @@ func (c *externalAuthClusterServiceCreateSyncer) SyncOnce(ctx context.Context, k
 
 	// For the ExternalAuth, we retrieve from the actual database because we are about to use its data to interact with cluster-service.
 	externalAuth, err = c.resourcesDBClient.HCPClusters(key.SubscriptionID, key.ResourceGroupName).ExternalAuth(key.HCPClusterName).Get(ctx, key.HCPExternalAuthName)
-	if database.IsNotFoundError(err) {
+	if cosmosstorageutils.IsNotFoundError(err) {
 		return nil
 	}
 	if err != nil {
@@ -148,7 +145,7 @@ func (c *externalAuthClusterServiceCreateSyncer) SyncOnce(ctx context.Context, k
 	replacement := externalAuth.DeepCopy()
 	replacement.ServiceProviderProperties.ClusterServiceID = externalAuthCSInternalID.DeepCopy() // DeepCopy() to avoid referencing the original pointer
 	_, err = c.resourcesDBClient.HCPClusters(key.SubscriptionID, key.ResourceGroupName).ExternalAuth(key.HCPClusterName).Replace(ctx, replacement, nil)
-	if database.IsPreconditionFailedError(err) {
+	if cosmosstorageutils.IsPreconditionFailedError(err) {
 		// if we have a conflict error, then we're guaranteed that our informer will eventually see an update and trigger us again.
 		return nil
 	}
@@ -171,10 +168,6 @@ func (c *externalAuthClusterServiceCreateSyncer) findCSExternalAuth(ctx context.
 		return nil, err
 	}
 	return ea, nil
-}
-
-func (c *externalAuthClusterServiceCreateSyncer) CooldownChecker() controllerutil.CooldownChecker {
-	return c.cooldownChecker
 }
 
 func (c *externalAuthClusterServiceCreateSyncer) isOCMErrorBadRequest(err error) bool {

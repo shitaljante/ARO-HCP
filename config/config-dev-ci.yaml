@@ -130,7 +130,7 @@ clouds:
           image:
             registry: "quay.io"
             repository: "roivaz/cihealth"
-            tag: "c402cb7"
+            digest: sha256:d6be00b644b6b69bd412fc475629905ab5225e2de2ffbdfda66850f4bb9d53d0 # d07a0f1 (2026-08-05 13:40)
           disableRuntimeWorkloads: false
           app:
             replicas: 2
@@ -161,7 +161,16 @@ clouds:
           image:
             registry: "arohcpsvcdev.azurecr.io"
             repository: "tenant-quota-collector"
-            tag: "latest"
+            digest: sha256:c6e386a9a5062bbd09e8293fe46ec8c48c55fa9f9cd0246ce49bf73ff4e4de36 # ef02fdd3ab543a4a97774df285fdaad73ef2eaf4 (2026-08-06 15:58)
+          prow:
+            enabled: true
+            baseURL: "https://prow.ci.openshift.org"
+            interval: "5m"
+            retention: "24h"
+            repository:
+              org: "Azure"
+              name: "ARO-HCP"
+            excludeJobs: []
           tenants:
           - tenantId: "64dc69e4-d083-49fc-9569-ebece1dd1408"
             tenantName: "RedHat0"
@@ -260,17 +269,27 @@ clouds:
           - name: "ARO HCP E2E Infrastructure (EA Subscription)"
             id: "0ef1ad54-9296-44cd-9600-5dc8e9a74034"
           mockIdentities:
+            vaultUrl: "https://aro-hcp-dev-svc-kv.vault.azure.net"
             firstParty:
               applicationName: "aro-dev-first-party2"
+              certName: "firstPartyCert2"
               certDns: "firstparty.hcp.osadev.cloud"
             armHelper:
               applicationName: "aro-dev-arm-helper2"
+              certName: "armHelperCert2"
               certDns: "armhelper.hcp.osadev.cloud"
+            armHelperPool:
+              appBaseName: "aro-dev-arm-helper-pool"
+              certBaseName: "armHelperPoolCert"
+              certBaseDns: "armhelperpool.hcp.osadev.cloud"
+              size: 40
             msiMock:
               applicationName: "aro-dev-msi-mock2"
+              certName: "msiMockCert2"
               certDns: "msimock.hcp.osadev.cloud"
             pool:
               appBaseName: "aro-dev-msi-mock-pool"
+              certBaseName: "msiMockPoolCert"
               certBaseDns: "msimockpool.hcp.osadev.cloud"
               size: 20
         int:
@@ -280,17 +299,26 @@ clouds:
           - name: "ARO SRE Team - INT (EA Subscription 3)"
             id: "64f0619f-ebc2-4156-9d91-c4c781de7e54"
           mockIdentities:
+            vaultUrl: "https://aro-hcp-int-kv.vault.azure.net"
             firstParty:
               applicationName: "aro-hcp-int-fp"
+              certName: "intFirstPartyCert"
               certDns: "intfirstparty.hcp.osadev.cloud"
             armHelper:
               applicationName: "aro-hcp-int-arm-helper"
+              certName: "intArmHelperCert"
               certDns: "intarmhelper.hcp.osadev.cloud"
+            clustersServiceArmHelper:
+              applicationName: "aro-hcp-int-cs-arm-helper"
+              certName: "intCsArmHelperCert"
+              certDns: "intcsarmhelper.hcp.osadev.cloud"
             msiMock:
               applicationName: "aro-hcp-int-msi-mock"
+              certName: "intMsiMockCert"
               certDns: "intmsimock.hcp.osadev.cloud"
             pool:
               appBaseName: "aro-hcp-int-msi-mock-pool"
+              certBaseName: "intMsiMockPoolCert"
               certBaseDns: "intmsimockpool.hcp.osadev.cloud"
               size: 0
         stg:

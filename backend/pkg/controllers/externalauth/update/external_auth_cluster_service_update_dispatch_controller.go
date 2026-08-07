@@ -28,12 +28,13 @@ import (
 	arohcpv1alpha1 "github.com/openshift-online/ocm-sdk-go/arohcp/v1alpha1"
 	ocmerrors "github.com/openshift-online/ocm-sdk-go/errors"
 
-	"github.com/Azure/ARO-HCP/backend/pkg/controllers/controllerutils"
-	"github.com/Azure/ARO-HCP/backend/pkg/informers"
-	"github.com/Azure/ARO-HCP/backend/pkg/listers"
+	"github.com/Azure/ARO-HCP/backend/pkg/utils/controllerutils"
 	"github.com/Azure/ARO-HCP/internal/api"
 	controllerutil "github.com/Azure/ARO-HCP/internal/controllerutils"
-	"github.com/Azure/ARO-HCP/internal/database"
+	"github.com/Azure/ARO-HCP/internal/database/cosmosstorage/corecosmosstorage"
+	"github.com/Azure/ARO-HCP/internal/database/cosmosstorage/cosmosstorageutils"
+	"github.com/Azure/ARO-HCP/internal/database/informers/coreinformers"
+	"github.com/Azure/ARO-HCP/internal/database/listers/corelisters"
 	"github.com/Azure/ARO-HCP/internal/ocm"
 	"github.com/Azure/ARO-HCP/internal/utils"
 )
@@ -50,9 +51,8 @@ import (
 // (operation_external_auth_update_state_calculation.go): dispatch sends updates, operation state
 // verifies propagation before the ARM external auth update operation succeeds.
 type externalAuthClusterServiceUpdateDispatchSyncer struct {
-	cooldownChecker      controllerutil.CooldownChecker
-	externalAuthLister   listers.ExternalAuthLister
-	resourcesDBClient    database.ResourcesDBClient
+	externalAuthLister   corelisters.ExternalAuthLister
+	resourcesDBClient    corecosmosstorage.ResourcesDBClient
 	clusterServiceClient ocm.ClusterServiceClientSpec
 
 	// minimumReconcileTimeCooldownChecker ensures we don't hotloop from any source,
@@ -63,16 +63,15 @@ type externalAuthClusterServiceUpdateDispatchSyncer struct {
 var _ controllerutils.ExternalAuthSyncer = (*externalAuthClusterServiceUpdateDispatchSyncer)(nil)
 
 func NewExternalAuthClusterServiceUpdateDispatchController(
-	resourcesDBClient database.ResourcesDBClient,
+	resourcesDBClient corecosmosstorage.ResourcesDBClient,
 	clusterServiceClient ocm.ClusterServiceClientSpec,
-	activeOperationLister listers.ActiveOperationLister,
-	backendInformers informers.BackendInformers,
+	activeOperationLister corelisters.ActiveOperationLister,
+	backendInformers coreinformers.BackendInformers,
 ) controllerutils.Controller {
 	_, externalAuthLister := backendInformers.ExternalAuths()
 	syncer := NewExternalAuthClusterServiceUpdateDispatchSyncer(
 		resourcesDBClient,
 		clusterServiceClient,
-		activeOperationLister,
 		externalAuthLister,
 	)
 
@@ -86,13 +85,11 @@ func NewExternalAuthClusterServiceUpdateDispatchController(
 }
 
 func NewExternalAuthClusterServiceUpdateDispatchSyncer(
-	resourcesDBClient database.ResourcesDBClient,
+	resourcesDBClient corecosmosstorage.ResourcesDBClient,
 	clusterServiceClient ocm.ClusterServiceClientSpec,
-	activeOperationLister listers.ActiveOperationLister,
-	externalAuthLister listers.ExternalAuthLister,
+	externalAuthLister corelisters.ExternalAuthLister,
 ) controllerutils.ExternalAuthSyncer {
 	return &externalAuthClusterServiceUpdateDispatchSyncer{
-		cooldownChecker: controllerutils.DefaultActiveOperationPrioritizingCooldown(activeOperationLister),
 		// We set minimumReconcileTimeCooldownChecker so that SyncOnce is not executed
 		// more than once per minute.
 		minimumReconcileTimeCooldownChecker: controllerutil.NewTimeBasedCooldownChecker(1 * time.Minute),
@@ -115,10 +112,6 @@ func needsWork(ea *api.HCPOpenShiftClusterExternalAuth) bool {
 	return true
 }
 
-func (c *externalAuthClusterServiceUpdateDispatchSyncer) CooldownChecker() controllerutil.CooldownChecker {
-	return c.cooldownChecker
-}
-
 func (c *externalAuthClusterServiceUpdateDispatchSyncer) SyncOnce(ctx context.Context, key controllerutils.HCPExternalAuthKey) error {
 	logger := utils.LoggerFromContext(ctx)
 
@@ -132,7 +125,7 @@ func (c *externalAuthClusterServiceUpdateDispatchSyncer) SyncOnce(ctx context.Co
 	}
 
 	cachedExternalAuth, err := c.externalAuthLister.Get(ctx, key.SubscriptionID, key.ResourceGroupName, key.HCPClusterName, key.HCPExternalAuthName)
-	if database.IsNotFoundError(err) {
+	if cosmosstorageutils.IsNotFoundError(err) {
 		return nil
 	}
 	if err != nil {
@@ -144,7 +137,7 @@ func (c *externalAuthClusterServiceUpdateDispatchSyncer) SyncOnce(ctx context.Co
 
 	externalAuthCRUD := c.resourcesDBClient.HCPClusters(key.SubscriptionID, key.ResourceGroupName).ExternalAuth(key.HCPClusterName)
 	externalAuth, err := externalAuthCRUD.Get(ctx, key.HCPExternalAuthName)
-	if database.IsNotFoundError(err) {
+	if cosmosstorageutils.IsNotFoundError(err) {
 		return nil
 	}
 	if err != nil {
