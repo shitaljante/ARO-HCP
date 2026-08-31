@@ -365,9 +365,10 @@ which performs a **transactional batch** to atomically update the operation and 
 | | Object | Fields |
 |---|--------|--------|
 | Read | `Operation` | <ul><li>`Status` (ShouldProcess: must not be terminal)</li><li>`Request` (ShouldProcess: must be `Create`)</li><li>`ExternalID` (ShouldProcess: resource type must be `ExternalAuthResourceType`)</li><li>`ResourceID.Name`</li></ul> |
-| Read | `HCPOpenShiftClusterExternalAuth` | <ul><li>`ServiceProviderProperties.ActiveOperationID` (mismatch check)</li><li>`ServiceProviderProperties.DeletionTimestamp` (NeedsWork: must be nil)</li><li>`ServiceProviderProperties.ClusterServiceID` (NeedsWork: must not be nil)</li></ul> |
-| Read | Cluster Service | <ul><li>external auth GET (success implies Succeeded)</li></ul> |
-| **Write** | **`Operation`** | <ul><li>**`Status`** -> `Succeeded`/`Failed`</li><li>**`Error`** (on failure)</li><li>**`LastTransitionTime`**</li><li>**`NotificationURI`** (cleared after ARM notification)</li></ul> |
+| Read | `HCPOpenShiftClusterExternalAuth` | <ul><li>`ServiceProviderProperties.ActiveOperationID` (mismatch check)</li><li>`ServiceProviderProperties.DeletionTimestamp` (NeedsWork: must be nil)</li><li>`ServiceProviderProperties.ClusterServiceID` (NeedsWork: must not be nil)</li><li>`Name`</li><li>`Properties.Issuer` (URL, Audiences)</li><li>`Properties.Clients` (ClientID, Component.Name, Component.AuthClientNamespace, ExtraScopes)</li><li>`Properties.Claim` (Mappings.Username.Claim/PrefixPolicy/Prefix, Mappings.Groups.Claim/Prefix, ValidationRules)</li></ul> |
+| Read | ReadDesire (HostedCluster) | <ul><li>`Spec.Configuration.Authentication.OIDCProviders` (Name, Issuer, OIDCClients, ClaimMappings, ClaimValidationRules). Spec match is required for Succeeded; OIDC client secret status is not.</li></ul> |
+| Read | Cluster Service | <ul><li>external auth GET (success is necessary but not sufficient)</li></ul> |
+| **Write** | **`Operation`** | <ul><li>**`Status`** -> `Provisioning`/`Succeeded`/`Failed`</li><li>**`Error`** (on failure)</li><li>**`LastTransitionTime`**</li><li>**`NotificationURI`** (cleared after ARM notification)</li></ul> |
 | **Write** | **`HCPOpenShiftClusterExternalAuth`** | <ul><li>**`Properties.ProvisioningState`** = new status</li><li>**`ServiceProviderProperties.ActiveOperationID`** = `""` (on terminal)</li></ul> |
 
 #### OperationExternalAuthUpdate
@@ -1057,6 +1058,19 @@ No Cosmos writes. Posts `NodePoolUpgradePolicy` to Cluster Service.
 | **Write** | **`HCPOpenShiftClusterNodePool`** | <ul><li>**`Status.Conditions[Degraded]`** = aggregated union</li></ul> |
 | **Write** | **`HCPOpenShiftClusterExternalAuth`** | <ul><li>**`Status.Conditions[Degraded]`** = aggregated union</li></ul> |
 
+#### ExternalAuthOIDCClientStatus
+
+**File:** [externalauth_oidc_client_status.go](../backend/pkg/controllers/externalauth/status/externalauth_oidc_client_status.go)
+**Trigger:** ExternalAuth informer, 1-minute resync
+**Gate (SyncOnce preconditions):**
+- `ExternalAuth.ServiceProviderProperties.DeletionTimestamp` == nil
+
+| | Object | Fields |
+|---|--------|--------|
+| Read | `HCPOpenShiftClusterExternalAuth` | <ul><li>`ServiceProviderProperties.DeletionTimestamp` (SyncOnce: must be nil)</li><li>`Name` (secret name hint when reason is `OIDCClientSecretGet`)</li><li>`Properties.Clients` (component name/namespace used to match OIDC clients)</li><li>`Status.UserFacingConditions` (skip write when unchanged)</li></ul> |
+| Read | ReadDesire (HostedCluster) | <ul><li>`Status.Configuration.Authentication.OIDCClients[].Conditions` (Available / Degraded / Progressing, reasons such as `OIDCConfigAvailable`, `OIDCClientSecretGet`, `DeploymentOIDCConfig`, `CLIOIDCConfigAvailable`)</li></ul> |
+| **Write** | **`HCPOpenShiftClusterExternalAuth`** | <ul><li>**`Status.UserFacingConditions[Available]`**, **`[Degraded]`**, **`[Progressing]`** unioned from matching OIDC clients (ARM `properties.status.conditions`)</li></ul> |
+
 #### ClusterRequirementsValidAggregator
 
 **File:** [cluster_requirements_valid_aggregator.go](../backend/pkg/controllers/statuscontrollers/cluster_requirements_valid_aggregator.go)
@@ -1406,6 +1420,14 @@ Single writer today (`RequirementsValid` only).
 | [NodePoolClusterServiceCreate](#nodepoolclusterservicecreate) | Sets from CS POST response |
 | [NodePoolDeletionClusterServiceIDClearer](#nodepooldeletionclusterserviceidclearer) | Clears to `nil` on CS 404 |
 
+### `HCPOpenShiftClusterExternalAuth.Status.UserFacingConditions`
+
+| Actor | When |
+|-------|------|
+| [ExternalAuthOIDCClientStatus](#externalauthoidcclientstatus) | Union of HostedCluster OIDC client Available / Degraded / Progressing conditions |
+
+Single writer.
+
 ### `HCPOpenShiftClusterExternalAuth.Properties.ProvisioningState`
 
 | Actor | When |
@@ -1413,7 +1435,7 @@ Single writer today (`RequirementsValid` only).
 | [Frontend: PUT ExternalAuth (Create)](#put-externalauth-create) | Sets to `Accepted` |
 | [Frontend: PUT/PATCH ExternalAuth (Update)](#putpatch-externalauth-update) | Sets to `Accepted` |
 | [Frontend: DELETE ExternalAuth](#delete-externalauth) | Sets to `Deleting` |
-| [OperationExternalAuthCreate](#operationexternalauthcreate) | Advances to `Succeeded`/`Failed` |
+| [OperationExternalAuthCreate](#operationexternalauthcreate) | Advances to `Provisioning`/`Succeeded`/`Failed` |
 | [OperationExternalAuthUpdate](#operationexternalauthupdate) | Advances to `Updating`/`Succeeded`/`Failed` |
 | [OperationExternalAuthDelete](#operationexternalauthdelete) | Advances to `Deleting`/`Succeeded`/`Failed` |
 

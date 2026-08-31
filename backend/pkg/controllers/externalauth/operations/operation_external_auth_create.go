@@ -33,6 +33,7 @@ import (
 	"github.com/Azure/ARO-HCP/internal/database/cosmosstorage/cosmosstorageutils"
 	"github.com/Azure/ARO-HCP/internal/database/informers/coreinformers"
 	"github.com/Azure/ARO-HCP/internal/database/listers/corelisters"
+	"github.com/Azure/ARO-HCP/internal/database/listers/kubeapplierlisters"
 	"github.com/Azure/ARO-HCP/internal/ocm"
 	"github.com/Azure/ARO-HCP/internal/utils"
 )
@@ -43,6 +44,7 @@ type operationExternalAuthCreate struct {
 	activeOperationsLister corelisters.ActiveOperationLister
 	externalAuthLister     corelisters.ExternalAuthLister
 	clusterServiceClient   ocm.ClusterServiceClientSpec
+	readDesireLister       kubeapplierlisters.ReadDesireLister
 	notificationClient     *http.Client
 }
 
@@ -64,6 +66,7 @@ func NewOperationExternalAuthCreateController(
 	clock utilsclock.PassiveClock,
 	resourcesDBClient corecosmosstorage.ResourcesDBClient,
 	clusterServiceClient ocm.ClusterServiceClientSpec,
+	readDesireLister kubeapplierlisters.ReadDesireLister,
 	notificationClient *http.Client,
 	activeOperationInformer cache.SharedIndexInformer,
 	backendInformers coreinformers.BackendInformers,
@@ -77,6 +80,7 @@ func NewOperationExternalAuthCreateController(
 		externalAuthLister:     externalAuthLister,
 		activeOperationsLister: activeOperationsLister,
 		clusterServiceClient:   clusterServiceClient,
+		readDesireLister:       readDesireLister,
 		notificationClient:     notificationClient,
 	}
 

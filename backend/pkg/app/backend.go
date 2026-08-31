@@ -611,6 +611,7 @@ func (b *Backend) runBackendControllersUnderLeaderElection(ctx context.Context, 
 		b.clock,
 		b.options.ResourcesDBClient,
 		b.options.ClustersServiceClient,
+		unionReadDesireLister,
 		http.DefaultClient,
 		activeOperationInformer,
 		backendInformers,
@@ -758,6 +759,13 @@ func (b *Backend) runBackendControllersUnderLeaderElection(ctx context.Context, 
 		b.options.ResourcesDBClient,
 		externalAuthLister,
 		controllerLister,
+		backendInformers,
+		b.clock,
+	)
+	externalAuthOIDCClientStatusController := externalauthstatus.NewExternalAuthOIDCClientStatusController(
+		b.options.ResourcesDBClient,
+		externalAuthLister,
+		unionReadDesireLister,
 		backendInformers,
 		b.clock,
 	)
@@ -1075,6 +1083,7 @@ func (b *Backend) runBackendControllersUnderLeaderElection(ctx context.Context, 
 				go nodePoolDegradedAggregatorController.Run(ctx, 20)
 				go nodePoolRequirementsValidAggregatorController.Run(ctx, 20)
 				go externalAuthDegradedAggregatorController.Run(ctx, 20)
+				go externalAuthOIDCClientStatusController.Run(ctx, 20)
 				go desiredControlPlaneSizeController.Run(ctx, 20)
 				go serviceProviderClusterPropertiesSyncController.Run(ctx, 20)
 				go azureRPRegistrationValidationController.Run(ctx, 20)

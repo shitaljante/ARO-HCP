@@ -29,19 +29,22 @@ import (
 	utilsclock "k8s.io/utils/clock"
 
 	arohcpv1alpha1 "github.com/openshift-online/ocm-sdk-go/arohcp/v1alpha1"
+	"github.com/openshift/hypershift/api/hypershift/v1beta1"
 
 	operationtesting "github.com/Azure/ARO-HCP/backend/pkg/utils/operationutils/operationtesting"
 	"github.com/Azure/ARO-HCP/internal/api/coreapi"
+	"github.com/Azure/ARO-HCP/internal/api/kubeapplierapi"
 	"github.com/Azure/ARO-HCP/internal/database/cosmosstorage/cosmosstorageutils"
 	"github.com/Azure/ARO-HCP/internal/database/cosmosstoragetesting/corecosmosstoragetesting"
 	"github.com/Azure/ARO-HCP/internal/database/listertesting/corelistertesting"
+	"github.com/Azure/ARO-HCP/internal/database/listertesting/kubeapplierlistertesting"
 	"github.com/Azure/ARO-HCP/internal/ocm"
 	"github.com/Azure/ARO-HCP/internal/utils"
 )
 
 func TestOperationExternalAuthCreate_SynchronizeOperation(t *testing.T) {
-	defaultExternalAuth := func(fixture *operationtesting.ExternalAuthTestFixture) *coreapi.HCPOpenShiftClusterExternalAuth {
-		return fixture.NewExternalAuth()
+	passingExternalAuth := func(fixture *operationtesting.ExternalAuthTestFixture) *coreapi.HCPOpenShiftClusterExternalAuth {
+		return operationtesting.NewExternalAuthUpdateTestExternalAuth()
 	}
 
 	externalAuthWithoutCSID := func(fixture *operationtesting.ExternalAuthTestFixture) *coreapi.HCPOpenShiftClusterExternalAuth {
@@ -68,27 +71,38 @@ func TestOperationExternalAuthCreate_SynchronizeOperation(t *testing.T) {
 		return ea
 	}
 
+	passingCSMock := func(ctrl *gomock.Controller, fixture *operationtesting.ExternalAuthTestFixture) ocm.ClusterServiceClientSpec {
+		mockCSClient := ocm.NewMockClusterServiceClientSpec(ctrl)
+		externalAuth, _ := arohcpv1alpha1.NewExternalAuth().
+			ID(operationtesting.TestExternalAuthIDStr).
+			Build()
+		mockCSClient.EXPECT().
+			GetExternalAuth(gomock.Any(), fixture.ExternalAuthInternalID).
+			Return(externalAuth, nil)
+		return mockCSClient
+	}
+
+	matchingHostedCluster := func(t *testing.T) *kubeapplierapi.ReadDesire {
+		t.Helper()
+		return operationtesting.NewHostedClusterReadDesire(t, &v1beta1.HostedCluster{
+			Spec: operationtesting.ExternalAuthUpdateMatchingHostedClusterSpec(),
+		})
+	}
+
 	tests := []struct {
-		name         string
-		externalAuth func(fixture *operationtesting.ExternalAuthTestFixture) *coreapi.HCPOpenShiftClusterExternalAuth
-		setupCSMock  func(ctrl *gomock.Controller, fixture *operationtesting.ExternalAuthTestFixture) ocm.ClusterServiceClientSpec
-		expectError  bool
-		verify       func(t *testing.T, ctx context.Context, db *corecosmosstoragetesting.MockResourcesDBClient, fixture *operationtesting.ExternalAuthTestFixture)
+		name          string
+		externalAuth  func(fixture *operationtesting.ExternalAuthTestFixture) *coreapi.HCPOpenShiftClusterExternalAuth
+		setupCSMock   func(ctrl *gomock.Controller, fixture *operationtesting.ExternalAuthTestFixture) ocm.ClusterServiceClientSpec
+		hostedCluster func(t *testing.T) *kubeapplierapi.ReadDesire
+		expectError   bool
+		verify        func(t *testing.T, ctx context.Context, db *corecosmosstoragetesting.MockResourcesDBClient, fixture *operationtesting.ExternalAuthTestFixture)
 	}{
 		{
-			name:         "external auth exists transitions to succeeded",
-			externalAuth: defaultExternalAuth,
-			setupCSMock: func(ctrl *gomock.Controller, fixture *operationtesting.ExternalAuthTestFixture) ocm.ClusterServiceClientSpec {
-				mockCSClient := ocm.NewMockClusterServiceClientSpec(ctrl)
-				externalAuth, _ := arohcpv1alpha1.NewExternalAuth().
-					ID(operationtesting.TestExternalAuthIDStr).
-					Build()
-				mockCSClient.EXPECT().
-					GetExternalAuth(gomock.Any(), fixture.ExternalAuthInternalID).
-					Return(externalAuth, nil)
-				return mockCSClient
-			},
-			expectError: false,
+			name:          "CS exists and HostedCluster spec matches transitions to succeeded",
+			externalAuth:  passingExternalAuth,
+			setupCSMock:   passingCSMock,
+			hostedCluster: matchingHostedCluster,
+			expectError:   false,
 			verify: func(t *testing.T, ctx context.Context, db *corecosmosstoragetesting.MockResourcesDBClient, fixture *operationtesting.ExternalAuthTestFixture) {
 				op, err := db.Operations(operationtesting.TestSubscriptionID).Get(ctx, operationtesting.TestOperationName)
 				require.NoError(t, err)
@@ -101,8 +115,46 @@ func TestOperationExternalAuthCreate_SynchronizeOperation(t *testing.T) {
 			},
 		},
 		{
+			name:         "CS exists but HostedCluster not observed stays Provisioning",
+			externalAuth: passingExternalAuth,
+			setupCSMock:  passingCSMock,
+			expectError:  false,
+			verify: func(t *testing.T, ctx context.Context, db *corecosmosstoragetesting.MockResourcesDBClient, fixture *operationtesting.ExternalAuthTestFixture) {
+				op, err := db.Operations(operationtesting.TestSubscriptionID).Get(ctx, operationtesting.TestOperationName)
+				require.NoError(t, err)
+				assert.Equal(t, coreapi.ProvisioningStateProvisioning, op.Status)
+
+				externalAuth, err := db.HCPClusters(operationtesting.TestSubscriptionID, operationtesting.TestResourceGroupName).ExternalAuth(operationtesting.TestClusterName).Get(ctx, operationtesting.TestExternalAuthName)
+				require.NoError(t, err)
+				assert.Equal(t, coreapi.ProvisioningStateProvisioning, externalAuth.Properties.ProvisioningState)
+				assert.Equal(t, operationtesting.TestOperationName, externalAuth.ServiceProviderProperties.ActiveOperationID)
+			},
+		},
+		{
+			name:         "CS exists but HostedCluster spec mismatches stays Provisioning",
+			externalAuth: passingExternalAuth,
+			setupCSMock:  passingCSMock,
+			hostedCluster: func(t *testing.T) *kubeapplierapi.ReadDesire {
+				t.Helper()
+				return operationtesting.NewHostedClusterReadDesire(t, &v1beta1.HostedCluster{
+					Spec: v1beta1.HostedClusterSpec{},
+				})
+			},
+			expectError: false,
+			verify: func(t *testing.T, ctx context.Context, db *corecosmosstoragetesting.MockResourcesDBClient, fixture *operationtesting.ExternalAuthTestFixture) {
+				op, err := db.Operations(operationtesting.TestSubscriptionID).Get(ctx, operationtesting.TestOperationName)
+				require.NoError(t, err)
+				assert.Equal(t, coreapi.ProvisioningStateProvisioning, op.Status)
+
+				externalAuth, err := db.HCPClusters(operationtesting.TestSubscriptionID, operationtesting.TestResourceGroupName).ExternalAuth(operationtesting.TestClusterName).Get(ctx, operationtesting.TestExternalAuthName)
+				require.NoError(t, err)
+				assert.Equal(t, coreapi.ProvisioningStateProvisioning, externalAuth.Properties.ProvisioningState)
+				assert.Equal(t, operationtesting.TestOperationName, externalAuth.ServiceProviderProperties.ActiveOperationID)
+			},
+		},
+		{
 			name:         "external auth get error returns error",
-			externalAuth: defaultExternalAuth,
+			externalAuth: passingExternalAuth,
 			setupCSMock: func(ctrl *gomock.Controller, fixture *operationtesting.ExternalAuthTestFixture) ocm.ClusterServiceClientSpec {
 				mockCSClient := ocm.NewMockClusterServiceClientSpec(ctrl)
 				mockCSClient.EXPECT().
@@ -175,12 +227,18 @@ func TestOperationExternalAuthCreate_SynchronizeOperation(t *testing.T) {
 				mockCSClient = ocm.NewMockClusterServiceClientSpec(ctrl)
 			}
 
+			var desires []*kubeapplierapi.ReadDesire
+			if tt.hostedCluster != nil {
+				desires = []*kubeapplierapi.ReadDesire{tt.hostedCluster(t)}
+			}
+
 			controller := &operationExternalAuthCreate{
 				clock:                  utilsclock.RealClock{},
 				resourcesDBClient:      mockResourcesDBClient,
 				activeOperationsLister: &corelistertesting.DBActiveOperationLister{ResourcesDBClient: mockResourcesDBClient},
 				externalAuthLister:     &corelistertesting.DBExternalAuthLister{ResourcesDBClient: mockResourcesDBClient},
 				clusterServiceClient:   mockCSClient,
+				readDesireLister:       &kubeapplierlistertesting.SliceReadDesireLister{Desires: desires},
 				notificationClient:     nil,
 			}
 

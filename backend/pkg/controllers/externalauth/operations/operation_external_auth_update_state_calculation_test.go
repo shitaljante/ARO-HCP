@@ -196,7 +196,6 @@ func TestHypershiftHostedClusterExternalAuthOperationState(t *testing.T) {
 func TestHypershiftHostedClusterExternalAuthIssuerSpecMatchesDesired(t *testing.T) {
 	t.Parallel()
 
-	controller := &operationExternalAuthUpdate{}
 	matchingProvider := operationtesting.ExternalAuthUpdateMatchingOIDCProvider()
 
 	tests := []struct {
@@ -245,7 +244,7 @@ func TestHypershiftHostedClusterExternalAuthIssuerSpecMatchesDesired(t *testing.
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			matches, msg := controller.hypershiftHostedClusterExternalAuthIssuerSpecMatchesDesired(tt.desired, tt.observed)
+			matches, msg := hypershiftHostedClusterExternalAuthIssuerSpecMatchesDesired(tt.desired, tt.observed)
 			assert.Equal(t, tt.wantMatch, matches)
 			if tt.wantSubstr != "" {
 				assert.Contains(t, msg, tt.wantSubstr)
@@ -257,7 +256,6 @@ func TestHypershiftHostedClusterExternalAuthIssuerSpecMatchesDesired(t *testing.
 func TestHypershiftHostedClusterExternalAuthClientsSpecMatchesDesired(t *testing.T) {
 	t.Parallel()
 
-	controller := &operationExternalAuthUpdate{}
 	matchingClients := operationtesting.ExternalAuthUpdateMatchingOIDCProvider().OIDCClients
 
 	tests := []struct {
@@ -390,7 +388,7 @@ func TestHypershiftHostedClusterExternalAuthClientsSpecMatchesDesired(t *testing
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			matches, msg := controller.hypershiftHostedClusterExternalAuthClientsSpecMatchesDesired(tt.desired, tt.observed)
+			matches, msg := hypershiftHostedClusterExternalAuthClientsSpecMatchesDesired(tt.desired, tt.observed)
 			assert.Equal(t, tt.wantMatch, matches)
 			if tt.wantSubstr != "" {
 				assert.Contains(t, msg, tt.wantSubstr)
@@ -401,8 +399,6 @@ func TestHypershiftHostedClusterExternalAuthClientsSpecMatchesDesired(t *testing
 
 func TestHypershiftHostedClusterExternalAuthClaimMappingsSpecMatchesDesired(t *testing.T) {
 	t.Parallel()
-
-	controller := &operationExternalAuthUpdate{}
 
 	newMatchingClaim := func() coreapi.ExternalAuthClaimProfile {
 		return operationtesting.NewExternalAuthUpdateTestExternalAuth().Properties.Claim
@@ -531,7 +527,7 @@ func TestHypershiftHostedClusterExternalAuthClaimMappingsSpecMatchesDesired(t *t
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			matches, msg := controller.hypershiftHostedClusterExternalAuthClaimMappingsSpecMatchesDesired(tt.desired, tt.observed)
+			matches, msg := hypershiftHostedClusterExternalAuthClaimMappingsSpecMatchesDesired(tt.desired, tt.observed)
 			assert.Equal(t, tt.wantMatch, matches)
 			if tt.wantSubstr != "" {
 				assert.Contains(t, msg, tt.wantSubstr)
@@ -543,7 +539,6 @@ func TestHypershiftHostedClusterExternalAuthClaimMappingsSpecMatchesDesired(t *t
 func TestHypershiftHostedClusterExternalAuthValidationRulesSpecMatchesDesired(t *testing.T) {
 	t.Parallel()
 
-	controller := &operationExternalAuthUpdate{}
 	matchingRules := operationtesting.ExternalAuthUpdateMatchingOIDCProvider().ClaimValidationRules
 
 	tests := []struct {
@@ -642,7 +637,7 @@ func TestHypershiftHostedClusterExternalAuthValidationRulesSpecMatchesDesired(t 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			matches, msg := controller.hypershiftHostedClusterExternalAuthValidationRulesSpecMatchesDesired(tt.desired, tt.observed)
+			matches, msg := hypershiftHostedClusterExternalAuthValidationRulesSpecMatchesDesired(tt.desired, tt.observed)
 			assert.Equal(t, tt.wantMatch, matches)
 			if tt.wantSubstr != "" {
 				assert.Contains(t, msg, tt.wantSubstr)

@@ -34,7 +34,7 @@ type HCPOpenShiftClusterExternalAuth struct {
 	Properties HCPOpenShiftClusterExternalAuthProperties `json:"properties"`
 	// Written by: Frontend PUT/PATCH/DELETE ExternalAuth, OperationExternalAuth* controllers, ExternalAuthClusterServiceCreate, ExternalAuthDeletion* controllers
 	ServiceProviderProperties HCPOpenShiftClusterExternalAuthServiceProviderProperties `json:"serviceProviderProperties,omitempty"`
-	// Written by: ExternalAuthDegradedAggregator
+	// Written by: ExternalAuthDegradedAggregator, ExternalAuthOIDCClientStatus
 	Status HCPOpenShiftClusterExternalAuthStatus `json:"status"`
 }
 
@@ -58,6 +58,7 @@ type HCPOpenShiftClusterExternalAuthStatus struct {
 	// Addition of new conditions here should be done only when strictly necessary, sparingly and only done
 	// when there is a clear benefit to doing so. We expect the number of conditions at this
 	// level to be kept to a minimum.
+	// Written by: ExternalAuthOIDCClientStatus
 	// +optional
 	// +patchMergeKey=type
 	// +patchStrategy=merge
