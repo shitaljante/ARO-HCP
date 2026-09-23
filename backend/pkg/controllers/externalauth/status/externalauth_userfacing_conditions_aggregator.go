@@ -94,6 +94,10 @@ func isUserFacingCondition(condType string) bool {
 	return ok
 }
 
+func (c *externalAuthUserFacingConditionsAggregator) needsWork(externalAuth *coreapi.HCPOpenShiftClusterExternalAuth) bool {
+	return externalAuth.ServiceProviderProperties.DeletionTimestamp == nil
+}
+
 func (c *externalAuthUserFacingConditionsAggregator) SyncOnce(ctx context.Context, key controllerutils.HCPExternalAuthKey) error {
 	existing, err := c.externalAuthLister.Get(ctx, key.SubscriptionID, key.ResourceGroupName, key.HCPClusterName, key.HCPExternalAuthName)
 	if cosmosstorageutils.IsNotFoundError(err) {
@@ -101,6 +105,10 @@ func (c *externalAuthUserFacingConditionsAggregator) SyncOnce(ctx context.Contex
 	}
 	if err != nil {
 		return utils.TrackError(fmt.Errorf("failed to get ExternalAuth from cache: %w", err))
+	}
+
+	if !c.needsWork(existing) {
+		return nil
 	}
 
 	serviceProviderExternalAuth, err := c.serviceProviderExternalAuthLister.Get(ctx, key.SubscriptionID, key.ResourceGroupName, key.HCPClusterName, key.HCPExternalAuthName)

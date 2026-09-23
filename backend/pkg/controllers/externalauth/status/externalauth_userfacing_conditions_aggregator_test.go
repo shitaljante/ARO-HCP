@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -195,6 +196,40 @@ func TestExternalAuthUserFacingConditionsAggregator_SyncOnce(t *testing.T) {
 				ServiceProviderExternalAuth.Status.Conditions = []metav1.Condition{nonUserFacingCondition}
 			}),
 			expectNoWrite: true,
+		},
+		{
+			name: "freezes conditions during deletion — preserves last-known Available",
+			externalAuth: newTestExternalAuthForAvailable(func(ea *coreapi.HCPOpenShiftClusterExternalAuth) {
+				ea.ServiceProviderProperties.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+				ea.Status.UserFacingConditions = []metav1.Condition{availableTrue}
+			}),
+			// SPEA has a different condition, but the aggregator must not
+			// update UserFacingConditions because the resource is deleting.
+			serviceProviderExternalAuth: newTestServiceProviderExternalAuth(func(ServiceProviderExternalAuth *coreapi.ServiceProviderExternalAuth) {
+				ServiceProviderExternalAuth.Status.Conditions = []metav1.Condition{availableFalse}
+			}),
+			expectNoWrite: true,
+		},
+		{
+			name: "freezes conditions during deletion — preserves empty conditions",
+			externalAuth: newTestExternalAuthForAvailable(func(ea *coreapi.HCPOpenShiftClusterExternalAuth) {
+				ea.ServiceProviderProperties.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+				// No UserFacingConditions were ever written before deletion.
+			}),
+			serviceProviderExternalAuth: newTestServiceProviderExternalAuth(func(ServiceProviderExternalAuth *coreapi.ServiceProviderExternalAuth) {
+				ServiceProviderExternalAuth.Status.Conditions = []metav1.Condition{availableTrue}
+			}),
+			expectNoWrite: true,
+		},
+		{
+			name: "freezes conditions during deletion — SPEA already cleaned up",
+			externalAuth: newTestExternalAuthForAvailable(func(ea *coreapi.HCPOpenShiftClusterExternalAuth) {
+				ea.ServiceProviderProperties.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+				ea.Status.UserFacingConditions = []metav1.Condition{availableTrue}
+			}),
+			// SPEA has been deleted by the child cleanup controller.
+			serviceProviderExternalAuth: nil,
+			expectNoWrite:               true,
 		},
 	}
 
