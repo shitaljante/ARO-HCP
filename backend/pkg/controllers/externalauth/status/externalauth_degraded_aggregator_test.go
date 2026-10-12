@@ -245,5 +245,3 @@ func TestExternalAuthDegradedAggregator_SyncOnce(t *testing.T) {
 		})
 	}
 }
-
-

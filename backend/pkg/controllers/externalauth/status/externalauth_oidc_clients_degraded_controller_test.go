@@ -16,6 +16,13 @@ package status
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
 	"strings"
 	"testing"
 	"time"
@@ -814,6 +821,25 @@ func TestExternalAuthOIDCClientsDegradedController_SyncOnce(t *testing.T) {
 	}
 }
 
+// mustMakeCAPEM creates a self-signed CA PEM for testing with the given
+// validity window.
+func mustMakeCAPEM(t *testing.T, cn string, notBefore, notAfter time.Time) string {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err, "generate test CA key")
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: cn},
+		NotBefore:             notBefore,
+		NotAfter:              notAfter,
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	require.NoError(t, err, "create test CA certificate")
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+}
+
 // TestCACertValidityConditions exercises the getCaCertValidityConditions helper in isolation,
 // covering both the expiry and not-yet-valid cases. Certs use wide margins
 // around time.Now() so the assertions are not sensitive to wall-clock drift.
@@ -825,74 +851,84 @@ func TestCACertValidityConditions(t *testing.T) {
 	futureCA := mustMakeCAPEM(t, "future-ca", now.Add(24*time.Hour), now.Add(90*24*time.Hour))
 
 	tests := []struct {
-		name                 string
-		ca                   string
-		expectExpiryNil      bool
-		expectExpiryReason   string
-		expectExpiryMessage  string
-		expectNotYetValidNil bool
-		expectNYVReason      string
-		expectNYVMessage     string
+		name               string
+		ca                 string
+		expectExpiryStatus metav1.ConditionStatus
+		expectExpiryReason string
+		expectExpiryMsg    string
+		expectNYVStatus    metav1.ConditionStatus
+		expectNYVReason    string
+		expectNYVMsg       string
 	}{
 		{
-			name:                 "empty CA — both conditions nil",
-			ca:                   "",
-			expectExpiryNil:      true,
-			expectNotYetValidNil: true,
+			name:               "empty CA — both False",
+			ca:                 "",
+			expectExpiryStatus: metav1.ConditionFalse,
+			expectExpiryReason: coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
+			expectNYVStatus:    metav1.ConditionFalse,
+			expectNYVReason:    coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
 		},
 		{
-			name:                 "currently valid CA — both conditions nil",
-			ca:                   validCA,
-			expectExpiryNil:      true,
-			expectNotYetValidNil: true,
+			name:               "currently valid CA — both False",
+			ca:                 validCA,
+			expectExpiryStatus: metav1.ConditionFalse,
+			expectExpiryReason: coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
+			expectNYVStatus:    metav1.ConditionFalse,
+			expectNYVReason:    coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
 		},
 		{
-			name:                 "expired CA — expiry set, notYetValid nil",
-			ca:                   expiredCA,
-			expectExpiryNil:      false,
-			expectExpiryReason:   "Expired",
-			expectExpiryMessage:  "have expired",
-			expectNotYetValidNil: true,
+			name:               "expired CA — expiry True, notYetValid False",
+			ca:                 expiredCA,
+			expectExpiryStatus: metav1.ConditionTrue,
+			expectExpiryReason: coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation,
+			expectExpiryMsg:    "have expired",
+			expectNYVStatus:    metav1.ConditionFalse,
+			expectNYVReason:    coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
 		},
 		{
-			name:                 "future CA — expiry nil, notYetValid set",
-			ca:                   futureCA,
-			expectExpiryNil:      true,
-			expectNotYetValidNil: false,
-			expectNYVReason:      "NotYetValid",
-			expectNYVMessage:     "are not yet valid",
+			name:               "future CA — expiry False, notYetValid True",
+			ca:                 futureCA,
+			expectExpiryStatus: metav1.ConditionFalse,
+			expectExpiryReason: coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
+			expectNYVStatus:    metav1.ConditionTrue,
+			expectNYVReason:    coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation,
+			expectNYVMsg:       "are not yet valid",
 		},
 		{
-			name:                 "bundle: one valid, one expired — expiry set",
-			ca:                   validCA + expiredCA,
-			expectExpiryNil:      false,
-			expectExpiryReason:   "Expired",
-			expectExpiryMessage:  "have expired",
-			expectNotYetValidNil: true,
+			name:               "bundle: one valid, one expired — expiry True",
+			ca:                 validCA + expiredCA,
+			expectExpiryStatus: metav1.ConditionTrue,
+			expectExpiryReason: coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation,
+			expectExpiryMsg:    "have expired",
+			expectNYVStatus:    metav1.ConditionFalse,
+			expectNYVReason:    coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
 		},
 		{
-			name:                 "bundle: one valid, one future — notYetValid set",
-			ca:                   validCA + futureCA,
-			expectExpiryNil:      true,
-			expectNotYetValidNil: false,
-			expectNYVReason:      "NotYetValid",
-			expectNYVMessage:     "are not yet valid",
+			name:               "bundle: one valid, one future — notYetValid True",
+			ca:                 validCA + futureCA,
+			expectExpiryStatus: metav1.ConditionFalse,
+			expectExpiryReason: coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
+			expectNYVStatus:    metav1.ConditionTrue,
+			expectNYVReason:    coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation,
+			expectNYVMsg:       "are not yet valid",
 		},
 		{
-			name:                 "bundle: expired and future — both set",
-			ca:                   expiredCA + futureCA,
-			expectExpiryNil:      false,
-			expectExpiryReason:   "Expired",
-			expectExpiryMessage:  "have expired",
-			expectNotYetValidNil: false,
-			expectNYVReason:      "NotYetValid",
-			expectNYVMessage:     "are not yet valid",
+			name:               "bundle: expired and future — both True",
+			ca:                 expiredCA + futureCA,
+			expectExpiryStatus: metav1.ConditionTrue,
+			expectExpiryReason: coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation,
+			expectExpiryMsg:    "have expired",
+			expectNYVStatus:    metav1.ConditionTrue,
+			expectNYVReason:    coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation,
+			expectNYVMsg:       "are not yet valid",
 		},
 		{
-			name:                 "unparseable PEM — both nil",
-			ca:                   "NOT A PEM",
-			expectExpiryNil:      true,
-			expectNotYetValidNil: true,
+			name:               "unparseable PEM — both False",
+			ca:                 "NOT A PEM",
+			expectExpiryStatus: metav1.ConditionFalse,
+			expectExpiryReason: coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
+			expectNYVStatus:    metav1.ConditionFalse,
+			expectNYVReason:    coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
 		},
 	}
 
@@ -900,24 +936,18 @@ func TestCACertValidityConditions(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			expiry, notYetValid := getCaCertValidityConditions(tc.ca)
 
-			if tc.expectExpiryNil {
-				assert.Nil(t, expiry, "expected no expiry condition")
-			} else {
-				require.NotNil(t, expiry, "expected expiry condition")
-				assert.Equal(t, OIDCClientCACertificateExpiredConditionType, expiry.Type)
-				assert.Equal(t, metav1.ConditionTrue, expiry.Status)
-				assert.Equal(t, tc.expectExpiryReason, expiry.Reason)
-				assert.Contains(t, expiry.Message, tc.expectExpiryMessage)
+			assert.Equal(t, OIDCClientCACertificateExpiredConditionType, expiry.Type)
+			assert.Equal(t, tc.expectExpiryStatus, expiry.Status, "expiry status")
+			assert.Equal(t, tc.expectExpiryReason, expiry.Reason, "expiry reason")
+			if tc.expectExpiryMsg != "" {
+				assert.Contains(t, expiry.Message, tc.expectExpiryMsg, "expiry message")
 			}
 
-			if tc.expectNotYetValidNil {
-				assert.Nil(t, notYetValid, "expected no notYetValid condition")
-			} else {
-				require.NotNil(t, notYetValid, "expected notYetValid condition")
-				assert.Equal(t, OIDCClientCACertificateNotYetValidConditionType, notYetValid.Type)
-				assert.Equal(t, metav1.ConditionTrue, notYetValid.Status)
-				assert.Equal(t, tc.expectNYVReason, notYetValid.Reason)
-				assert.Contains(t, notYetValid.Message, tc.expectNYVMessage)
+			assert.Equal(t, OIDCClientCACertificateNotYetValidConditionType, notYetValid.Type)
+			assert.Equal(t, tc.expectNYVStatus, notYetValid.Status, "notYetValid status")
+			assert.Equal(t, tc.expectNYVReason, notYetValid.Reason, "notYetValid reason")
+			if tc.expectNYVMsg != "" {
+				assert.Contains(t, notYetValid.Message, tc.expectNYVMsg, "notYetValid message")
 			}
 		})
 	}
@@ -925,34 +955,43 @@ func TestCACertValidityConditions(t *testing.T) {
 
 // TestExternalAuthUserFacingAggregator_SyncOnce_CACertConditions verifies that SyncOnce
 // correctly aggregates CA certificate validity conditions from SPEA (set by
-// the OIDC controller) into the OIDCClientsDegraded condition on
+// the OIDC controller) into the Degraded condition on
 // ExternalAuth.Status.UserFacingConditions.
 func TestExternalAuthUserFacingAggregator_SyncOnce_CACertConditions(t *testing.T) {
 	tests := []struct {
 		name                string
 		speaConditions      []metav1.Condition
-		wantDegradedTrue    bool
+		wantStatus          metav1.ConditionStatus
 		wantMessageContains string
 	}{
 		{
-			name:           "no CA cert conditions on SPEA — OIDCClientsDegraded=False",
+			name:           "no conditions on SPEA — Degraded=Unknown (not yet reported)",
 			speaConditions: nil,
+			wantStatus:     metav1.ConditionUnknown,
 		},
 		{
-			name: "expired CA condition on SPEA — OIDCClientsDegraded=True",
+			name: "expired CA condition on SPEA — Degraded=True",
 			speaConditions: []metav1.Condition{
-				{Type: OIDCClientCACertificateExpiredConditionType, Status: metav1.ConditionTrue, Reason: "Expired", Message: "1 CA certificate(s) in the issuer bundle have expired: CN=test-ca"},
+				{Type: OIDCClientCACertificateExpiredConditionType, Status: metav1.ConditionTrue, Reason: coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation, Message: "1 CA certificate(s) in the issuer bundle have expired: CN=test-ca"},
 			},
-			wantDegradedTrue:    true,
+			wantStatus:          metav1.ConditionTrue,
 			wantMessageContains: "have expired",
 		},
 		{
-			name: "not-yet-valid CA condition on SPEA — OIDCClientsDegraded=True",
+			name: "not-yet-valid CA condition on SPEA — Degraded=True",
 			speaConditions: []metav1.Condition{
-				{Type: OIDCClientCACertificateNotYetValidConditionType, Status: metav1.ConditionTrue, Reason: "NotYetValid", Message: "1 CA certificate(s) in the issuer bundle are not yet valid: CN=test-ca"},
+				{Type: OIDCClientCACertificateNotYetValidConditionType, Status: metav1.ConditionTrue, Reason: coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation, Message: "1 CA certificate(s) in the issuer bundle are not yet valid: CN=test-ca"},
 			},
-			wantDegradedTrue:    true,
+			wantStatus:          metav1.ConditionTrue,
 			wantMessageContains: "are not yet valid",
+		},
+		{
+			name: "CA cert conditions False on SPEA — Degraded=False",
+			speaConditions: []metav1.Condition{
+				{Type: OIDCClientCACertificateExpiredConditionType, Status: metav1.ConditionFalse, Reason: coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected, Message: coreapi.ExternalAuthMessageAllOperational},
+				{Type: OIDCClientCACertificateNotYetValidConditionType, Status: metav1.ConditionFalse, Reason: coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected, Message: coreapi.ExternalAuthMessageAllOperational},
+			},
+			wantStatus: metav1.ConditionFalse,
 		},
 	}
 
@@ -965,7 +1004,7 @@ func TestExternalAuthUserFacingAggregator_SyncOnce_CACertConditions(t *testing.T
 					"/providers/Microsoft.RedHatOpenShift/hcpOpenShiftClusters/" + statusutils.TestClusterName,
 			))
 			existing := newTestExternalAuthForAggregatorTests()
-			serviceProviderExternalAuth := newTestServiceProviderExternalAuthForAggregator(func(spea *coreapi.ServiceProviderExternalAuth) {
+			serviceProviderExternalAuth := newTestServiceProviderExternalAuth(func(spea *coreapi.ServiceProviderExternalAuth) {
 				spea.Status.Conditions = tc.speaConditions
 			})
 			parentCluster := &coreapi.Cluster{
@@ -998,14 +1037,11 @@ func TestExternalAuthUserFacingAggregator_SyncOnce_CACertConditions(t *testing.T
 			updated, err := mockDB.HCPClusters(statusutils.TestSubscriptionID, statusutils.TestResourceGroupName).ExternalAuth(statusutils.TestClusterName).Get(ctx, statusutils.TestExternalAuthName)
 			require.NoError(t, err)
 
-			cond := apimeta.FindStatusCondition(updated.Status.UserFacingConditions, coreapi.ExternalAuthOIDCClientsDegradedCondition)
-			require.NotNil(t, cond, "OIDCClientsDegraded condition must always be present")
-
-			if tc.wantDegradedTrue {
-				assert.Equal(t, metav1.ConditionTrue, cond.Status, "OIDCClientsDegraded should be True")
-				assert.Contains(t, cond.Message, tc.wantMessageContains, "OIDCClientsDegraded message")
-			} else {
-				assert.Equal(t, metav1.ConditionFalse, cond.Status, "OIDCClientsDegraded should be False")
+			cond := apimeta.FindStatusCondition(updated.Status.UserFacingConditions, statusutils.DegradedConditionType)
+			require.NotNil(t, cond, "Degraded condition must always be present")
+			assert.Equal(t, tc.wantStatus, cond.Status, "Degraded status")
+			if tc.wantMessageContains != "" {
+				assert.Contains(t, cond.Message, tc.wantMessageContains, "Degraded message")
 			}
 		})
 	}

@@ -64,7 +64,7 @@ const (
 
 	// hypershiftOIDCIssuerURLInvalid is the Degraded condition reason when
 	// the issuer URL configured for the external auth provider is invalid.
-	hypershiftOIDCIssuerURLInvalid = "OIDCIssuerURLInvalid"
+	hypershiftOIDCIssuerURLInvalidReason = "OIDCIssuerURLInvalid"
 
 	// OIDCClientCACertificateExpiredConditionType is the condition type set on
 	// ServiceProviderExternalAuth when the CA certificate has expired.
@@ -212,20 +212,11 @@ func (c *externalAuthOIDCClientsDegradedController) SyncOnce(ctx context.Context
 	replacement := serviceProviderExternalAuth.DeepCopy()
 	apimeta.SetStatusCondition(&replacement.Status.Conditions, condition)
 
-	// CA certificate validity: set or remove CACertificateExpired and
-	// CACertificateNotYetValid conditions. The user-facing aggregator
+	// CA certificate validity conditions. The user-facing aggregator
 	// passes these through to ExternalAuth.Status.UserFacingConditions.
 	expiryCond, notYetValidCond := getCaCertValidityConditions(existing.Properties.Issuer.CA)
-	if expiryCond != nil {
-		apimeta.SetStatusCondition(&replacement.Status.Conditions, *expiryCond)
-	} else {
-		apimeta.RemoveStatusCondition(&replacement.Status.Conditions, OIDCClientCACertificateExpiredConditionType)
-	}
-	if notYetValidCond != nil {
-		apimeta.SetStatusCondition(&replacement.Status.Conditions, *notYetValidCond)
-	} else {
-		apimeta.RemoveStatusCondition(&replacement.Status.Conditions, OIDCClientCACertificateNotYetValidConditionType)
-	}
+	apimeta.SetStatusCondition(&replacement.Status.Conditions, expiryCond)
+	apimeta.SetStatusCondition(&replacement.Status.Conditions, notYetValidCond)
 
 	if equality.Semantic.DeepEqual(serviceProviderExternalAuth.Status.Conditions, replacement.Status.Conditions) {
 		return nil
@@ -427,13 +418,26 @@ func (c *externalAuthOIDCClientsDegradedController) mapDegradedReasonToMessage(r
 //   - notYetValidCond is set when any cert has a start date in the future;
 //
 // Missing, empty, or entirely unparseable input causes both to return nil.
-func getCaCertValidityConditions(ca string) (expiryCond, notYetValidCond *metav1.Condition) {
+func getCaCertValidityConditions(ca string) (expiryCond, notYetValidCond metav1.Condition) {
+	expiryCond = metav1.Condition{
+		Type:    OIDCClientCACertificateExpiredConditionType,
+		Status:  metav1.ConditionFalse,
+		Reason:  coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
+		Message: coreapi.ExternalAuthMessageAllOperational,
+	}
+	notYetValidCond = metav1.Condition{
+		Type:    OIDCClientCACertificateNotYetValidConditionType,
+		Status:  metav1.ConditionFalse,
+		Reason:  coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
+		Message: coreapi.ExternalAuthMessageAllOperational,
+	}
+
 	if ca == "" {
-		return nil, nil
+		return expiryCond, notYetValidCond
 	}
 
 	var expired []*x509.Certificate
-	var notYetValid []*x509.Certificate
+	var notYetValidCerts []*x509.Certificate
 	now := time.Now()
 
 	rest := []byte(ca)
@@ -454,26 +458,20 @@ func getCaCertValidityConditions(ca string) (expiryCond, notYetValidCond *metav1
 			expired = append(expired, cert)
 		}
 		if now.Before(cert.NotBefore) {
-			notYetValid = append(notYetValid, cert)
+			notYetValidCerts = append(notYetValidCerts, cert)
 		}
 	}
 
 	if len(expired) > 0 {
-		expiryCond = &metav1.Condition{
-			Type:    OIDCClientCACertificateExpiredConditionType,
-			Status:  metav1.ConditionTrue,
-			Reason:  "Expired",
-			Message: formatCACertExpiredMessage(expired),
-		}
+		expiryCond.Status = metav1.ConditionTrue
+		expiryCond.Reason = coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation
+		expiryCond.Message = formatCACertExpiredMessage(expired)
 	}
 
-	if len(notYetValid) > 0 {
-		notYetValidCond = &metav1.Condition{
-			Type:    OIDCClientCACertificateNotYetValidConditionType,
-			Status:  metav1.ConditionTrue,
-			Reason:  "NotYetValid",
-			Message: formatCACertNotYetValidMessage(notYetValid),
-		}
+	if len(notYetValidCerts) > 0 {
+		notYetValidCond.Status = metav1.ConditionTrue
+		notYetValidCond.Reason = coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation
+		notYetValidCond.Message = formatCACertNotYetValidMessage(notYetValidCerts)
 	}
 
 	return expiryCond, notYetValidCond
