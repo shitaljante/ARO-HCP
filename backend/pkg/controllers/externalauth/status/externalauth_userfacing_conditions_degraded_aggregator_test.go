@@ -18,6 +18,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -62,6 +63,25 @@ func newTestExternalAuthForAggregatorTests(opts ...func(*coreapi.ExternalAuth)) 
 	}
 	return ea
 }
+
+// availableTrue and availableFalse represent the allowlisted OIDCClientsDegraded
+// condition on ServiceProviderExternalAuth in its healthy ("available") and
+// unhealthy ("not available") states, used to prove the aggregator ignores
+// SPEA condition changes once the ExternalAuth is deleting.
+var (
+	availableTrue = metav1.Condition{
+		Type:    coreapi.ExternalAuthOIDCClientsDegradedCondition,
+		Status:  metav1.ConditionFalse,
+		Reason:  coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
+		Message: coreapi.ExternalAuthMessageAllOperational,
+	}
+	availableFalse = metav1.Condition{
+		Type:    coreapi.ExternalAuthOIDCClientsDegradedCondition,
+		Status:  metav1.ConditionTrue,
+		Reason:  coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation,
+		Message: "console/openshift-console: " + coreapi.ExternalAuthMessageAwaitingSecret,
+	}
+)
 
 func newTestServiceProviderExternalAuthForAggregator(opts ...func(*coreapi.ServiceProviderExternalAuth)) *coreapi.ServiceProviderExternalAuth {
 	resourceID := metadataapi.Must(azcorearm.ParseResourceID(
@@ -259,6 +279,40 @@ func TestExternalAuthUserFacingDegradedAggregator_SyncOnce(t *testing.T) {
 				}
 			}),
 			serviceProviderExternalAuth: newTestServiceProviderExternalAuthForAggregator(),
+			expectNoWrite:               true,
+		},
+		{
+			name: "freezes conditions during deletion — preserves last-known Available",
+			externalAuth: newTestExternalAuthForAggregatorTests(func(ea *coreapi.ExternalAuth) {
+				ea.ServiceProviderProperties.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+				ea.Status.UserFacingConditions = []metav1.Condition{availableTrue}
+			}),
+			// SPEA has a different condition, but the aggregator must not
+			// update UserFacingConditions because the resource is deleting.
+			serviceProviderExternalAuth: newTestServiceProviderExternalAuth(func(ServiceProviderExternalAuth *coreapi.ServiceProviderExternalAuth) {
+				ServiceProviderExternalAuth.Status.Conditions = []metav1.Condition{availableFalse}
+			}),
+			expectNoWrite: true,
+		},
+		{
+			name: "freezes conditions during deletion — preserves empty conditions",
+			externalAuth: newTestExternalAuthForAggregatorTests(func(ea *coreapi.ExternalAuth) {
+				ea.ServiceProviderProperties.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+				// No UserFacingConditions were ever written before deletion.
+			}),
+			serviceProviderExternalAuth: newTestServiceProviderExternalAuth(func(ServiceProviderExternalAuth *coreapi.ServiceProviderExternalAuth) {
+				ServiceProviderExternalAuth.Status.Conditions = []metav1.Condition{availableTrue}
+			}),
+			expectNoWrite: true,
+		},
+		{
+			name: "freezes conditions during deletion — SPEA already cleaned up",
+			externalAuth: newTestExternalAuthForAggregatorTests(func(ea *coreapi.ExternalAuth) {
+				ea.ServiceProviderProperties.DeletionTimestamp = &metav1.Time{Time: time.Now()}
+				ea.Status.UserFacingConditions = []metav1.Condition{availableTrue}
+			}),
+			// SPEA has been deleted by the child cleanup controller.
+			serviceProviderExternalAuth: nil,
 			expectNoWrite:               true,
 		},
 	}

@@ -103,6 +103,10 @@ func NewExternalAuthUserFacingConditionsDegradedAggregatorController(
 	)
 }
 
+func (c *externalAuthUserFacingConditionsDegradedAggregator) needsWork(externalAuth *coreapi.ExternalAuth) bool {
+	return externalAuth.ServiceProviderProperties.DeletionTimestamp == nil
+}
+
 func (c *externalAuthUserFacingConditionsDegradedAggregator) SyncOnce(ctx context.Context, key controllerutils.HCPExternalAuthKey) error {
 	existing, err := c.externalAuthLister.Get(ctx, key.SubscriptionID, key.ResourceGroupName, key.HCPClusterName, key.HCPExternalAuthName)
 	if cosmosstorageutils.IsNotFoundError(err) {
@@ -112,6 +116,9 @@ func (c *externalAuthUserFacingConditionsDegradedAggregator) SyncOnce(ctx contex
 		return utils.TrackError(fmt.Errorf("failed to get ExternalAuth from cache: %w", err))
 	}
 
+	if !c.needsWork(existing) {
+		return nil
+	}
 	serviceProviderExternalAuth, err := c.serviceProviderExternalAuthLister.Get(ctx, key.SubscriptionID, key.ResourceGroupName, key.HCPClusterName, key.HCPExternalAuthName)
 	if cosmosstorageutils.IsNotFoundError(err) {
 		return nil
