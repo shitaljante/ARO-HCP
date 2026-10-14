@@ -200,7 +200,7 @@ func validateNodePoolProperties(ctx context.Context, op operation.Operation, fld
 	errs = append(errs, validateNodePoolForbiddenLabels(fldPath.Child("labels"), newObj.Labels)...)
 
 	//Taints                  []Taint                 `json:"taints,omitempty"`
-	errs = append(errs, validate.EachSliceVal(
+	errs = append(errs, validate.EachValSliceVal(
 		ctx, op, fldPath.Child("taints"),
 		newObj.Taints, safe.Field(oldObj, toNodePoolPropertiesTaints),
 		nil, nil,
@@ -279,7 +279,7 @@ func validateNodePoolVersionProfile(ctx context.Context, op operation.Operation,
 	//ChannelGroup string `json:"channelGroup,omitempty"`
 	errs = append(errs, validate.RequiredValue(ctx, op, fldPath.Child("channelGroup"), &newObj.ChannelGroup, safe.Field(oldObj, toNodePoolVersionProfileChannelGroup))...)
 
-	if !op.HasOption(metadataapi.FeatureExperimentalReleaseFeatures) {
+	if enabled, _ := op.HasOption(metadataapi.FeatureExperimentalReleaseFeatures); !enabled {
 		errs = append(errs, validate.Enum(ctx, op, fldPath.Child("channelGroup"), &newObj.ChannelGroup, safe.Field(oldObj, toNodePoolVersionProfileChannelGroup), metadataapi.AllowedChannelGroups, nil)...)
 	} else {
 		errs = append(errs, validate.Enum(ctx, op, fldPath.Child("channelGroup"), &newObj.ChannelGroup, safe.Field(oldObj, toNodePoolVersionProfileChannelGroup), metadataapi.AllowedChannelGroupsWithExperimentalFlag, nil)...)

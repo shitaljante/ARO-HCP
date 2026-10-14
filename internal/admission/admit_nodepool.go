@@ -311,7 +311,8 @@ func validateNodePoolVersionChange(ctx context.Context, admissionContext *NodePo
 
 	lowestCPVersion, highestCPVersion := apihelpers.FindLowestAndHighestClusterVersion(spCluster.Status.ControlPlaneVersion.ActiveVersions)
 
-	if err := validation.ValidateNodePoolVersionChange(newVersion, activeVersions, lowestCPVersion, highestCPVersion, op.HasOption(metadataapi.FeatureExperimentalReleaseFeatures)); err != nil {
+	allowMajorUpgrade, _ := op.HasOption(metadataapi.FeatureExperimentalReleaseFeatures)
+	if err := validation.ValidateNodePoolVersionChange(newVersion, activeVersions, lowestCPVersion, highestCPVersion, allowMajorUpgrade); err != nil {
 		errs = append(errs, field.Invalid(fldPath, newObj.ID, err.Error()))
 	}
 

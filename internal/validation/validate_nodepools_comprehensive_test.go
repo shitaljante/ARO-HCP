@@ -1766,7 +1766,7 @@ func TestValidateNodePoolUpdate(t *testing.T) {
 
 // testNodePoolFeatureOptions creates validation options from feature names,
 // matching production behavior by normalizing to lowercase.
-func testNodePoolFeatureOptions(names ...string) []string {
+func testNodePoolFeatureOptions(names ...string) map[string]bool {
 	features := make([]coreapi.Feature, len(names))
 	for i, name := range names {
 		features[i] = coreapi.Feature{
@@ -1810,7 +1810,7 @@ func TestValidateNodePoolVersionWithFeatureFlags(t *testing.T) {
 	tests := []struct {
 		name         string
 		nodePool     *coreapi.NodePool
-		opOptions    []string
+		opOptions    map[string]bool
 		expectErrors []utils.ExpectedError
 	}{
 		{
