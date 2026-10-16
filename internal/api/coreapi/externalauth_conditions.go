@@ -35,6 +35,16 @@ const (
 	// ExternalAuth.Status.UserFacingConditions and returned through the ARM
 	// API. All messages must be safe for external consumption.
 	ExternalAuthOIDCClientsDegradedCondition = "OIDCClientsDegraded"
+
+	// ExternalAuthOIDCIssuerCACertificateExpiredCondition is the condition type set on
+	// ServiceProviderExternalAuth when the issuer CA certificate has expired.
+	ExternalAuthOIDCIssuerCACertificateExpiredCondition = "OIDCIssuerCACertificateExpired"
+
+	// ExternalAuthOIDCIssuerCACertificateNotYetValidCondition is the condition type set on
+	// ServiceProviderExternalAuth when the issuer CA certificate has a NotBefore
+	// in the future. A future NotBefore is accepted at admission time but
+	// surfaced here so operators are aware.
+	ExternalAuthOIDCIssuerCACertificateNotYetValidCondition = "OIDCIssuerCACertificateNotYetValid"
 )
 
 // Reasons used with the OIDCClientsDegraded condition on

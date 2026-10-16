@@ -53,7 +53,9 @@ const (
 //
 // To add a new contributor, append its condition type here.
 var allowedDegradedConditionTypes = map[string]struct{}{
-	coreapi.ExternalAuthOIDCClientsDegradedCondition: {},
+	coreapi.ExternalAuthOIDCClientsDegradedCondition:                {},
+	coreapi.ExternalAuthOIDCIssuerCACertificateExpiredCondition:     {},
+	coreapi.ExternalAuthOIDCIssuerCACertificateNotYetValidCondition: {},
 }
 
 // externalAuthUserFacingConditionsDegradedAggregator aggregates allowlisted conditions
