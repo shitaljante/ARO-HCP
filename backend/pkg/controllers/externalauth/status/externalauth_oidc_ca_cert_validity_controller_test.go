@@ -62,10 +62,11 @@ func mustMakeCAPEM(t *testing.T, cn string, notBefore, notAfter time.Time) strin
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
 }
 
-// TestCACertValidityConditions exercises the getCaCertValidityConditions helper in isolation,
-// covering both the expiry and not-yet-valid cases. Certs use wide margins
-// around time.Now() so the assertions are not sensitive to wall-clock drift.
-func TestCACertValidityConditions(t *testing.T) {
+// TestGetCaCertValidityCondition exercises the getCaCertValidityCondition helper
+// in isolation, covering expired, not-yet-valid, mixed, and healthy cases.
+// Certs use wide margins around time.Now() so assertions are not sensitive to
+// wall-clock drift.
+func TestGetCaCertValidityCondition(t *testing.T) {
 	now := time.Now()
 
 	validCA := mustMakeCAPEM(t, "valid-ca", now.Add(-24*time.Hour), now.Add(90*24*time.Hour))
@@ -73,110 +74,98 @@ func TestCACertValidityConditions(t *testing.T) {
 	futureCA := mustMakeCAPEM(t, "future-ca", now.Add(24*time.Hour), now.Add(90*24*time.Hour))
 
 	tests := []struct {
-		name               string
-		ca                 string
-		expectExpiryStatus metav1.ConditionStatus
-		expectExpiryReason string
-		expectExpiryMsg    string
-		expectNYVStatus    metav1.ConditionStatus
-		expectNYVReason    string
-		expectNYVMsg       string
+		name         string
+		ca           string
+		expectStatus metav1.ConditionStatus
+		expectReason string
+		expectMsg    string
 	}{
 		{
-			name:               "empty CA — both False",
-			ca:                 "",
-			expectExpiryStatus: metav1.ConditionFalse,
-			expectExpiryReason: coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
-			expectNYVStatus:    metav1.ConditionFalse,
-			expectNYVReason:    coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
+			name:         "empty CA — False",
+			ca:           "",
+			expectStatus: metav1.ConditionFalse,
+			expectReason: coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
 		},
 		{
-			name:               "currently valid CA — both False",
-			ca:                 validCA,
-			expectExpiryStatus: metav1.ConditionFalse,
-			expectExpiryReason: coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
-			expectNYVStatus:    metav1.ConditionFalse,
-			expectNYVReason:    coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
+			name:         "currently valid CA — False",
+			ca:           validCA,
+			expectStatus: metav1.ConditionFalse,
+			expectReason: coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
 		},
 		{
-			name:               "expired CA — expiry True, notYetValid False",
-			ca:                 expiredCA,
-			expectExpiryStatus: metav1.ConditionTrue,
-			expectExpiryReason: coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation,
-			expectExpiryMsg:    "have expired",
-			expectNYVStatus:    metav1.ConditionFalse,
-			expectNYVReason:    coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
+			name:         "expired CA — True with expiry message",
+			ca:           expiredCA,
+			expectStatus: metav1.ConditionTrue,
+			expectReason: coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation,
+			expectMsg:    "have expired",
 		},
 		{
-			name:               "future CA — expiry False, notYetValid True",
-			ca:                 futureCA,
-			expectExpiryStatus: metav1.ConditionFalse,
-			expectExpiryReason: coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
-			expectNYVStatus:    metav1.ConditionTrue,
-			expectNYVReason:    coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation,
-			expectNYVMsg:       "are not yet valid",
+			name:         "future CA — True with not-yet-valid message",
+			ca:           futureCA,
+			expectStatus: metav1.ConditionTrue,
+			expectReason: coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation,
+			expectMsg:    "are not yet valid",
 		},
 		{
-			name:               "bundle: one valid, one expired — expiry True",
-			ca:                 validCA + expiredCA,
-			expectExpiryStatus: metav1.ConditionTrue,
-			expectExpiryReason: coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation,
-			expectExpiryMsg:    "have expired",
-			expectNYVStatus:    metav1.ConditionFalse,
-			expectNYVReason:    coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
+			name:         "bundle: one valid, one expired — True",
+			ca:           validCA + expiredCA,
+			expectStatus: metav1.ConditionTrue,
+			expectReason: coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation,
+			expectMsg:    "have expired",
 		},
 		{
-			name:               "bundle: one valid, one future — notYetValid True",
-			ca:                 validCA + futureCA,
-			expectExpiryStatus: metav1.ConditionFalse,
-			expectExpiryReason: coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
-			expectNYVStatus:    metav1.ConditionTrue,
-			expectNYVReason:    coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation,
-			expectNYVMsg:       "are not yet valid",
+			name:         "bundle: one valid, one future — True",
+			ca:           validCA + futureCA,
+			expectStatus: metav1.ConditionTrue,
+			expectReason: coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation,
+			expectMsg:    "are not yet valid",
 		},
 		{
-			name:               "bundle: expired and future — both True",
-			ca:                 expiredCA + futureCA,
-			expectExpiryStatus: metav1.ConditionTrue,
-			expectExpiryReason: coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation,
-			expectExpiryMsg:    "have expired",
-			expectNYVStatus:    metav1.ConditionTrue,
-			expectNYVReason:    coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation,
-			expectNYVMsg:       "are not yet valid",
+			name:         "bundle: expired and future — True with both messages",
+			ca:           expiredCA + futureCA,
+			expectStatus: metav1.ConditionTrue,
+			expectReason: coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation,
+			expectMsg:    "have expired",
 		},
 		{
-			name:               "unparseable PEM — both False",
-			ca:                 "NOT A PEM",
-			expectExpiryStatus: metav1.ConditionFalse,
-			expectExpiryReason: coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
-			expectNYVStatus:    metav1.ConditionFalse,
-			expectNYVReason:    coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
+			name:         "unparseable PEM — False",
+			ca:           "NOT A PEM",
+			expectStatus: metav1.ConditionFalse,
+			expectReason: coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			expiry, notYetValid := getCaCertValidityConditions(tc.ca)
+			cond := getCaCertValidityCondition(tc.ca)
 
-			assert.Equal(t, coreapi.ExternalAuthOIDCIssuerCACertificateExpiredCondition, expiry.Type)
-			assert.Equal(t, tc.expectExpiryStatus, expiry.Status, "expiry status")
-			assert.Equal(t, tc.expectExpiryReason, expiry.Reason, "expiry reason")
-			if tc.expectExpiryMsg != "" {
-				assert.Contains(t, expiry.Message, tc.expectExpiryMsg, "expiry message")
-			}
-
-			assert.Equal(t, coreapi.ExternalAuthOIDCIssuerCACertificateNotYetValidCondition, notYetValid.Type)
-			assert.Equal(t, tc.expectNYVStatus, notYetValid.Status, "notYetValid status")
-			assert.Equal(t, tc.expectNYVReason, notYetValid.Reason, "notYetValid reason")
-			if tc.expectNYVMsg != "" {
-				assert.Contains(t, notYetValid.Message, tc.expectNYVMsg, "notYetValid message")
+			assert.Equal(t, coreapi.ExternalAuthOIDCIssuerCACertificateValidityCompromisedCondition, cond.Type)
+			assert.Equal(t, tc.expectStatus, cond.Status, "condition status")
+			assert.Equal(t, tc.expectReason, cond.Reason, "condition reason")
+			if tc.expectMsg != "" {
+				assert.Contains(t, cond.Message, tc.expectMsg, "condition message")
 			}
 		})
 	}
 }
 
+// TestGetCaCertValidityCondition_MixedBundle_BothMessages verifies that when the
+// bundle has both expired and not-yet-valid certs, the single condition message
+// contains information about both issues.
+func TestGetCaCertValidityCondition_MixedBundle_BothMessages(t *testing.T) {
+	now := time.Now()
+	expiredCA := mustMakeCAPEM(t, "expired-ca", now.Add(-48*time.Hour), now.Add(-24*time.Hour))
+	futureCA := mustMakeCAPEM(t, "future-ca", now.Add(24*time.Hour), now.Add(90*24*time.Hour))
+
+	cond := getCaCertValidityCondition(expiredCA + futureCA)
+
+	assert.Equal(t, metav1.ConditionTrue, cond.Status)
+	assert.Contains(t, cond.Message, "have expired", "message should mention expired certs")
+	assert.Contains(t, cond.Message, "are not yet valid", "message should mention not-yet-valid certs")
+}
+
 // TestExternalAuthUserFacingAggregator_SyncOnce_CACertConditions verifies that SyncOnce
-// correctly aggregates CA certificate validity conditions from SPEA (set by
+// correctly aggregates the CA certificate validity condition from SPEA (set by
 // the CA cert validity controller) into the Degraded condition on
 // ExternalAuth.Status.UserFacingConditions.
 func TestExternalAuthUserFacingAggregator_SyncOnce_CACertConditions(t *testing.T) {
@@ -192,26 +181,25 @@ func TestExternalAuthUserFacingAggregator_SyncOnce_CACertConditions(t *testing.T
 			wantStatus:     metav1.ConditionUnknown,
 		},
 		{
-			name: "expired CA condition on SPEA — Degraded=True",
+			name: "compromised CA condition on SPEA (expired) — Degraded=True",
 			speaConditions: []metav1.Condition{
-				{Type: coreapi.ExternalAuthOIDCIssuerCACertificateExpiredCondition, Status: metav1.ConditionTrue, Reason: coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation, Message: "1 CA certificate(s) in the issuer bundle have expired: CN=test-ca"},
+				{Type: coreapi.ExternalAuthOIDCIssuerCACertificateValidityCompromisedCondition, Status: metav1.ConditionTrue, Reason: coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation, Message: "1 CA certificate(s) in the issuer bundle have expired: CN=test-ca"},
 			},
 			wantStatus:          metav1.ConditionTrue,
 			wantMessageContains: "have expired",
 		},
 		{
-			name: "not-yet-valid CA condition on SPEA — Degraded=True",
+			name: "compromised CA condition on SPEA (not-yet-valid) — Degraded=True",
 			speaConditions: []metav1.Condition{
-				{Type: coreapi.ExternalAuthOIDCIssuerCACertificateNotYetValidCondition, Status: metav1.ConditionTrue, Reason: coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation, Message: "1 CA certificate(s) in the issuer bundle are not yet valid: CN=test-ca"},
+				{Type: coreapi.ExternalAuthOIDCIssuerCACertificateValidityCompromisedCondition, Status: metav1.ConditionTrue, Reason: coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation, Message: "1 CA certificate(s) in the issuer bundle are not yet valid: CN=test-ca"},
 			},
 			wantStatus:          metav1.ConditionTrue,
 			wantMessageContains: "are not yet valid",
 		},
 		{
-			name: "CA cert conditions False on SPEA — Degraded=False",
+			name: "CA cert condition False on SPEA — Degraded=False",
 			speaConditions: []metav1.Condition{
-				{Type: coreapi.ExternalAuthOIDCIssuerCACertificateExpiredCondition, Status: metav1.ConditionFalse, Reason: coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected, Message: coreapi.ExternalAuthMessageAllOperational},
-				{Type: coreapi.ExternalAuthOIDCIssuerCACertificateNotYetValidCondition, Status: metav1.ConditionFalse, Reason: coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected, Message: coreapi.ExternalAuthMessageAllOperational},
+				{Type: coreapi.ExternalAuthOIDCIssuerCACertificateValidityCompromisedCondition, Status: metav1.ConditionFalse, Reason: coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected, Message: coreapi.ExternalAuthMessageAllOperational},
 			},
 			wantStatus: metav1.ConditionFalse,
 		},

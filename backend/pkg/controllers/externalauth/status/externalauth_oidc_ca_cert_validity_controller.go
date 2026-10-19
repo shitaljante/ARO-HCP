@@ -42,18 +42,18 @@ const (
 )
 
 // externalAuthCACertValidityController reads the CA certificate PEM from the
-// ExternalAuth and produces two conditions on
-// ServiceProviderExternalAuth.Status.Conditions:
-//   - OIDCIssuerCACertificateExpired: True when any cert in the bundle has expired.
-//   - OIDCIssuerCACertificateNotYetValid: True when any cert has a NotBefore in the future.
+// ExternalAuth and produces  OIDCIssuerCACertificateValidityCompromised
+// condition on ServiceProviderExternalAuth.Status.Conditions:
+//   - True when any cert in the bundle has expired or has a NotBefore in the future.
+//   - False when all certs are within their validity window (or the CA is empty).
 //
 // This controller is independent of HostedCluster state. It only inspects the
 // CA PEM stored on the ExternalAuth document. The
-// ExternalAuthUserFacingDegradedAggregator reads these conditions (alongside
-// OIDCClientsDegraded) and folds them into the single user-facing Degraded
+// ExternalAuthUserFacingDegradedAggregator reads this condition (alongside
+// OIDCClientsDegraded) and folds it into the single user-facing Degraded
 // condition on ExternalAuth.Status.UserFacingConditions.
 //
-// IMPORTANT: Messages written to these conditions are surfaced verbatim to
+// IMPORTANT: Messages written to this condition are surfaced verbatim to
 // end users through the ARM API. Never include internal implementation
 // details or cluster infrastructure paths in condition messages.
 type externalAuthCACertValidityController struct {
@@ -65,12 +65,13 @@ type externalAuthCACertValidityController struct {
 var _ controllerutils.ExternalAuthSyncer = (*externalAuthCACertValidityController)(nil)
 
 // NewExternalAuthCACertValidityController creates a controller that inspects
-// the CA certificate PEM on the ExternalAuth and writes expiry/not-yet-valid
-// conditions onto ServiceProviderExternalAuth.Status.Conditions. The
-// ExternalAuthUserFacingDegradedAggregator is responsible for promoting these
+// the CA certificate PEM on the ExternalAuth and writes an
+// OIDCIssuerCACertificateValidityCompromised condition onto
+// ServiceProviderExternalAuth.Status.Conditions. The
+// ExternalAuthUserFacingDegradedAggregator is responsible for promoting it
 // into the user-facing Degraded condition.
 //
-// Messages written to these conditions are surfaced to end users through the
+// Messages written to this condition are surfaced to end users through the
 // ARM API. Ensure all messages are safe for external consumption.
 func NewExternalAuthCACertValidityController(
 	resourcesDBClient corecosmosstorage.ResourcesDBClient,
@@ -117,11 +118,10 @@ func (c *externalAuthCACertValidityController) SyncOnce(ctx context.Context, key
 		return utils.TrackError(fmt.Errorf("failed to get ServiceProviderExternalAuth from cache: %w", err))
 	}
 
-	expiryCond, notYetValidCond := getCaCertValidityConditions(existing.Properties.Issuer.CA)
+	caCertValidityCompromisedCondition := getCaCertValidityCondition(existing.Properties.Issuer.CA)
 
 	replacement := serviceProviderExternalAuth.DeepCopy()
-	apimeta.SetStatusCondition(&replacement.Status.Conditions, expiryCond)
-	apimeta.SetStatusCondition(&replacement.Status.Conditions, notYetValidCond)
+	apimeta.SetStatusCondition(&replacement.Status.Conditions, caCertValidityCompromisedCondition)
 
 	if equality.Semantic.DeepEqual(serviceProviderExternalAuth.Status.Conditions, replacement.Status.Conditions) {
 		return nil
@@ -138,33 +138,26 @@ func (c *externalAuthCACertValidityController) SyncOnce(ctx context.Context, key
 	return nil
 }
 
-// getCaCertValidityConditions inspects all CERTIFICATE PEM blocks in ca and returns
-// two conditions: expiryCond (CACertificateExpired) and notYetValidCond (CACertificateNotYetValid).
-//   - expiryCond is True when any cert has expired;
-//   - notYetValidCond is True when any cert has a start date in the future;
+// getCaCertValidityCondition inspects all CERTIFICATE PEM blocks in ca and returns
+// a single OIDCIssuerCACertificateValidityCompromised condition:
+//   - True when any cert has expired or has a NotBefore in the future.
+//   - False when all certs are within their validity window (or CA is empty/unparseable).
 //
-// When the CA is empty or contains no parseable certificates, both conditions
-// are returned as False/AsExpected.
-func getCaCertValidityConditions(ca string) (expiryCond, notYetValidCond metav1.Condition) {
-	expiryCond = metav1.Condition{
-		Type:    coreapi.ExternalAuthOIDCIssuerCACertificateExpiredCondition,
-		Status:  metav1.ConditionFalse,
-		Reason:  coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
-		Message: coreapi.ExternalAuthMessageAllOperational,
-	}
-	notYetValidCond = metav1.Condition{
-		Type:    coreapi.ExternalAuthOIDCIssuerCACertificateNotYetValidCondition,
+// When both expired and not-yet-valid certs exist, the message lists both.
+func getCaCertValidityCondition(ca string) metav1.Condition {
+	condition := metav1.Condition{
+		Type:    coreapi.ExternalAuthOIDCIssuerCACertificateValidityCompromisedCondition,
 		Status:  metav1.ConditionFalse,
 		Reason:  coreapi.ExternalAuthOIDCClientsDegradedReasonAsExpected,
 		Message: coreapi.ExternalAuthMessageAllOperational,
 	}
 
 	if ca == "" {
-		return expiryCond, notYetValidCond
+		return condition
 	}
 
 	var expired []*x509.Certificate
-	var notYetValidCerts []*x509.Certificate
+	var notYetValid []*x509.Certificate
 	now := time.Now()
 
 	rest := []byte(ca)
@@ -185,23 +178,27 @@ func getCaCertValidityConditions(ca string) (expiryCond, notYetValidCond metav1.
 			expired = append(expired, cert)
 		}
 		if now.Before(cert.NotBefore) {
-			notYetValidCerts = append(notYetValidCerts, cert)
+			notYetValid = append(notYetValid, cert)
 		}
 	}
 
+	if len(expired) == 0 && len(notYetValid) == 0 {
+		return condition
+	}
+
+	condition.Status = metav1.ConditionTrue
+	condition.Reason = coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation
+
+	var messageParts []string
 	if len(expired) > 0 {
-		expiryCond.Status = metav1.ConditionTrue
-		expiryCond.Reason = coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation
-		expiryCond.Message = formatCACertExpiredMessage(expired)
+		messageParts = append(messageParts, formatCACertExpiredMessage(expired))
 	}
-
-	if len(notYetValidCerts) > 0 {
-		notYetValidCond.Status = metav1.ConditionTrue
-		notYetValidCond.Reason = coreapi.ExternalAuthOIDCClientsDegradedReasonDegradation
-		notYetValidCond.Message = formatCACertNotYetValidMessage(notYetValidCerts)
+	if len(notYetValid) > 0 {
+		messageParts = append(messageParts, formatCACertNotYetValidMessage(notYetValid))
 	}
+	condition.Message = strings.Join(messageParts, "; ")
 
-	return expiryCond, notYetValidCond
+	return condition
 }
 
 func formatCACertExpiredMessage(certs []*x509.Certificate) string {

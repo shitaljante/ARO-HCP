@@ -36,15 +36,13 @@ const (
 	// API. All messages must be safe for external consumption.
 	ExternalAuthOIDCClientsDegradedCondition = "OIDCClientsDegraded"
 
-	// ExternalAuthOIDCIssuerCACertificateExpiredCondition is the condition type set on
-	// ServiceProviderExternalAuth when the issuer CA certificate has expired.
-	ExternalAuthOIDCIssuerCACertificateExpiredCondition = "OIDCIssuerCACertificateExpired"
-
-	// ExternalAuthOIDCIssuerCACertificateNotYetValidCondition is the condition type set on
-	// ServiceProviderExternalAuth when the issuer CA certificate has a NotBefore
-	// in the future. A future NotBefore is accepted at admission time but
-	// surfaced here so operators are aware.
-	ExternalAuthOIDCIssuerCACertificateNotYetValidCondition = "OIDCIssuerCACertificateNotYetValid"
+	// ExternalAuthOIDCIssuerCACertificateValidityCompromisedCondition is the condition
+	// type set on ServiceProviderExternalAuth when any certificate in the issuer
+	// CA bundle has a validity problem — either expired (NotAfter in the past)
+	// or not yet valid (NotBefore in the future). A single condition type covers
+	// both failure modes; the Message lists the specific certificates and their
+	// issue (expired vs not-yet-valid).
+	ExternalAuthOIDCIssuerCACertificateValidityCompromisedCondition = "OIDCIssuerCACertificateValidityCompromised"
 )
 
 // Reasons used with the OIDCClientsDegraded condition on

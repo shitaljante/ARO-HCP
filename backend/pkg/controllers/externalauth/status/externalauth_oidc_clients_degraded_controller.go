@@ -199,7 +199,6 @@ func (c *externalAuthOIDCClientsDegradedController) SyncOnce(ctx context.Context
 
 	replacement := serviceProviderExternalAuth.DeepCopy()
 	apimeta.SetStatusCondition(&replacement.Status.Conditions, condition)
-
 	if equality.Semantic.DeepEqual(serviceProviderExternalAuth.Status.Conditions, replacement.Status.Conditions) {
 		return nil
 	}
